@@ -205,4 +205,8 @@ ownerRouter.delete(
   scheduleController.removeEmployee,
 );
 
+ownerRouter.put(
+  "/owner/attendances/:id/check-in",
+  attendanceController.fixCheckin,
+);
 export default ownerRouter;

@@ -59,3 +59,7 @@ export const fixCheckoutValidation = Joi.object({
   id: Joi.string().uuid().required(),
   check_out_at: Joi.date().iso().max("now").allow(null).required(),
 });
+export const fixCheckinValidation = Joi.object({
+  id: Joi.string().uuid().required(),
+  check_in_at: Joi.date().iso().required(),
+});

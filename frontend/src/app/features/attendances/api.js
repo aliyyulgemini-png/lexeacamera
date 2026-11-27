@@ -161,3 +161,14 @@ export async function deleteAttendanceDevice(id) {
   const response = await api.delete(`/owner/attendance-devices/${id}`);
   return response.data.data;
 }
+/**
+ * PUT /owner/attendances/:id/check-in
+ * check_in_at: string ISO 8601 (wajib). Mengembalikan objek rekap.
+ */
+export async function updateAttendanceCheckIn(id, { check_in_at }) {
+  const response = await api.put(`/owner/attendances/${id}/check-in`, {
+    check_in_at,
+  });
+
+  return response.data.data;
+}

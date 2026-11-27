@@ -11,6 +11,7 @@ import {
   FiClock,
   FiEdit2,
   FiLoader,
+  FiLogIn,
   FiLogOut,
   FiRefreshCw,
   FiRotateCcw,
@@ -22,6 +23,7 @@ import {
 import {
   useGetAttendances,
   useUpdateAttendance,
+  useUpdateAttendanceCheckIn,
 } from "../../../features/attendances/hooks.js";
 import notify from "../../../../lib/notify.js";
 import { normalizeApiError } from "../../../../lib/api/errors.js";
@@ -34,6 +36,7 @@ import PrimaryButton from "../../../../components/primary-button.jsx";
 
 const SETTINGS_PATH = "/owner/attendances/settings";
 const DAY_MS = 24 * 60 * 60 * 1000;
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-second4/40";
@@ -61,13 +64,29 @@ const STATUS = {
   MISSED: { label: "Lupa absen pulang", tone: "red", icon: FiAlertTriangle },
 };
 
-const PATCH_ERRORS = {
+// PUT /owner/attendances/:id/check-out
+const CHECKOUT_ERRORS = {
   CHECKOUT_BEFORE_CHECKIN: "Jam pulang harus sesudah jam masuk.",
   CHECKOUT_TOO_LATE: "Jam pulang paling lama 24 jam setelah jam masuk.",
   OVERLAPS_NEXT_ATTENDANCE:
     "Jam pulang melewati jam masuk sesi berikutnya milik karyawan ini.",
   ANOTHER_ATTENDANCE_OPEN:
     "Karyawan ini punya sesi lain yang masih terbuka, jadi sesi ini tidak bisa dibuka kembali.",
+};
+
+// PUT /owner/attendances/:id/check-in
+const CHECKIN_ERRORS = {
+  CHECKIN_IN_FUTURE: "Jam masuk tidak boleh di masa depan.",
+  CHECKIN_AFTER_CHECKOUT: "Jam masuk harus sebelum jam pulang.",
+  DURATION_TOO_LONG: "Jarak jam masuk ke jam pulang paling lama 24 jam.",
+  OPEN_ATTENDANCE_DAY_CHANGE:
+    "Sesi yang belum absen pulang tidak bisa dipindah ke hari lain. Isi jam pulang dulu, lalu ubah jam masuk.",
+  OVERLAPS_PREVIOUS_ATTENDANCE:
+    "Jam masuk bertabrakan dengan sesi sebelumnya milik karyawan ini.",
+  OVERLAPS_NEXT_ATTENDANCE:
+    "Jam masuk melewati jam masuk sesi berikutnya milik karyawan ini.",
+  ANOTHER_ATTENDANCE_SAME_DAY:
+    "Karyawan ini sudah punya absen lain di hari tersebut.",
 };
 
 /* -------------------------------- Formatters ------------------------------ */
@@ -129,6 +148,11 @@ function toLocalInput(value) {
   if (Number.isNaN(date.getTime())) return "";
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// Nomor hari menurut WIB (UTC+7), dipakai untuk membandingkan "hari yang sama".
+function wibDayKey(ms) {
+  return Math.floor((ms + WIB_OFFSET_MS) / DAY_MS);
 }
 
 /* ------------------------------ Small pieces ------------------------------ */
@@ -215,14 +239,29 @@ function Field({ id, label, children }) {
   );
 }
 
-function EditButton({ record, onClick }) {
-  const label = record.status === "DONE" ? "Ubah jam pulang" : "Isi jam pulang";
+function RecordActions({ record, onEdit }) {
+  const checkOutLabel =
+    record.status === "DONE" ? "Ubah jam pulang" : "Isi jam pulang";
 
   return (
-    <PrimaryButton type="button" onClick={() => onClick(record)} fullWidth>
-      <FiEdit2 size={16} aria-hidden="true" />
-      {label}
-    </PrimaryButton>
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => onEdit(record, "check-in")}
+        className={`${BTN_BASE} w-full border border-second/30 text-second hover:border-second4 hover:text-second4 ${FOCUS_RING}`}
+      >
+        <FiLogIn size={16} aria-hidden="true" />
+        Ubah jam masuk
+      </button>
+      <PrimaryButton
+        type="button"
+        onClick={() => onEdit(record, "check-out")}
+        fullWidth
+      >
+        <FiEdit2 size={16} aria-hidden="true" />
+        {checkOutLabel}
+      </PrimaryButton>
+    </div>
   );
 }
 
@@ -257,12 +296,23 @@ function LoadingState() {
 
 /* ------------------------------- Edit Dialog ----------------------------- */
 
-function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
+function EditDialog({
+  record,
+  mode,
+  busy,
+  apiError,
+  onClose,
+  onSave,
+  onReopen,
+}) {
+  const isCheckIn = mode === "check-in";
+
   const closeRef = useRef(null);
   const onCloseRef = useRef(onClose);
-  const [checkOut, setCheckOut] = useState(
-    record.check_out_at ? toLocalInput(record.check_out_at) : "",
-  );
+  const [value, setValue] = useState(() => {
+    if (isCheckIn) return toLocalInput(record.check_in_at);
+    return record.check_out_at ? toLocalInput(record.check_out_at) : "";
+  });
   const [localError, setLocalError] = useState("");
 
   useEffect(() => {
@@ -286,33 +336,86 @@ function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
   }, []);
 
   const checkInTime = new Date(record.check_in_at).getTime();
-  const maxTime = Math.min(Date.now(), checkInTime + DAY_MS);
+  const checkOutTime = record.check_out_at
+    ? new Date(record.check_out_at).getTime()
+    : null;
+
+  // Batas input datetime-local
+  let minValue;
+  let maxValue;
+  if (isCheckIn) {
+    minValue =
+      checkOutTime !== null
+        ? toLocalInput(new Date(checkOutTime - DAY_MS))
+        : undefined;
+    maxValue = toLocalInput(
+      new Date(
+        checkOutTime !== null ? Math.min(Date.now(), checkOutTime) : Date.now(),
+      ),
+    );
+  } else {
+    minValue = toLocalInput(record.check_in_at);
+    maxValue = toLocalInput(
+      new Date(Math.min(Date.now(), checkInTime + DAY_MS)),
+    );
+  }
+
+  function validateCheckOut(date) {
+    if (date.getTime() > Date.now()) {
+      return "Jam pulang tidak boleh di masa depan.";
+    }
+    if (date.getTime() <= checkInTime) {
+      return CHECKOUT_ERRORS.CHECKOUT_BEFORE_CHECKIN;
+    }
+    if (date.getTime() > checkInTime + DAY_MS) {
+      return CHECKOUT_ERRORS.CHECKOUT_TOO_LATE;
+    }
+    return "";
+  }
+
+  function validateCheckIn(date) {
+    const time = date.getTime();
+
+    if (value === toLocalInput(record.check_in_at)) {
+      return "Jam masuk belum diubah.";
+    }
+    if (time > Date.now()) {
+      return CHECKIN_ERRORS.CHECKIN_IN_FUTURE;
+    }
+    if (checkOutTime !== null) {
+      if (time >= checkOutTime) return CHECKIN_ERRORS.CHECKIN_AFTER_CHECKOUT;
+      if (checkOutTime - time > DAY_MS) return CHECKIN_ERRORS.DURATION_TOO_LONG;
+    } else if (wibDayKey(time) !== wibDayKey(checkInTime)) {
+      return CHECKIN_ERRORS.OPEN_ATTENDANCE_DAY_CHANGE;
+    }
+    return "";
+  }
 
   function handleSubmit(event) {
     event.preventDefault();
     setLocalError("");
 
-    if (!checkOut) {
-      setLocalError("Pilih jam pulang terlebih dahulu.");
+    if (!value) {
+      setLocalError(
+        isCheckIn
+          ? "Pilih jam masuk terlebih dahulu."
+          : "Pilih jam pulang terlebih dahulu.",
+      );
       return;
     }
 
-    const date = new Date(checkOut);
+    const date = new Date(value);
 
     if (Number.isNaN(date.getTime())) {
-      setLocalError("Jam pulang tidak valid.");
+      setLocalError(
+        isCheckIn ? "Jam masuk tidak valid." : "Jam pulang tidak valid.",
+      );
       return;
     }
-    if (date.getTime() > Date.now()) {
-      setLocalError("Jam pulang tidak boleh di masa depan.");
-      return;
-    }
-    if (date.getTime() <= checkInTime) {
-      setLocalError(PATCH_ERRORS.CHECKOUT_BEFORE_CHECKIN);
-      return;
-    }
-    if (date.getTime() > checkInTime + DAY_MS) {
-      setLocalError(PATCH_ERRORS.CHECKOUT_TOO_LATE);
+
+    const message = isCheckIn ? validateCheckIn(date) : validateCheckOut(date);
+    if (message) {
+      setLocalError(message);
       return;
     }
 
@@ -320,6 +423,15 @@ function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
   }
 
   const shownError = localError || apiError;
+
+  const title = isCheckIn
+    ? "Ubah jam masuk"
+    : record.check_out_at
+      ? "Ubah jam pulang"
+      : "Isi jam pulang";
+
+  const inputLabel = isCheckIn ? "Jam masuk" : "Jam pulang";
+  const HeaderIcon = isCheckIn ? FiLogIn : FiLogOut;
 
   return (
     <div
@@ -337,7 +449,7 @@ function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-grad text-primary shadow-lg shadow-second4/20">
-            <FiLogOut size={16} aria-hidden="true" />
+            <HeaderIcon size={16} aria-hidden="true" />
           </div>
 
           <button
@@ -356,7 +468,7 @@ function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
           id="edit-attendance-title"
           className="mt-4 text-lg font-bold text-second"
         >
-          {record.check_out_at ? "Ubah jam pulang" : "Isi jam pulang"}
+          {title}
         </h2>
 
         <dl className="mt-4 grid grid-cols-2 gap-4 rounded-xl bg-second/[0.03] p-4 text-sm">
@@ -373,38 +485,52 @@ function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
             </dd>
           </div>
           <div className="col-span-2 min-w-0">
-            <dt className="text-xs text-second/60">Jam masuk</dt>
+            <dt className="text-xs text-second/60">
+              {isCheckIn ? "Jam pulang" : "Jam masuk"}
+            </dt>
             <dd className="mt-2 font-semibold tabular-nums text-second">
-              {formatDateTimeFull(record.check_in_at)}
+              {isCheckIn
+                ? record.check_out_at
+                  ? formatDateTimeFull(record.check_out_at)
+                  : "Belum ada"
+                : formatDateTimeFull(record.check_in_at)}
             </dd>
           </div>
+          {isCheckIn && (
+            <div className="col-span-2 min-w-0">
+              <dt className="text-xs text-second/60">Jam masuk saat ini</dt>
+              <dd className="mt-2 font-semibold tabular-nums text-second">
+                {formatDateTimeFull(record.check_in_at)}
+              </dd>
+            </div>
+          )}
         </dl>
 
         <div className="mt-4">
-          <label htmlFor="check-out-at" className={labelClass}>
-            Jam pulang
+          <label htmlFor="edit-attendance-time" className={labelClass}>
+            {inputLabel}
             <span className="ml-2 text-second2" aria-hidden="true">
               *
             </span>
           </label>
           <input
-            id="check-out-at"
+            id="edit-attendance-time"
             type="datetime-local"
-            value={checkOut}
-            min={toLocalInput(record.check_in_at)}
-            max={toLocalInput(new Date(maxTime))}
+            value={value}
+            min={minValue}
+            max={maxValue}
             disabled={busy}
             onChange={(event) => {
-              setCheckOut(event.target.value);
+              setValue(event.target.value);
               setLocalError("");
             }}
             aria-invalid={shownError ? "true" : undefined}
             className={inputClass(Boolean(shownError))}
           />
           <p className="mt-2 text-xs leading-relaxed text-second/60">
-            Harus sesudah jam masuk, paling lama 24 jam sesudahnya, dan tidak
-            boleh melewati jam masuk sesi berikutnya. Waktu mengikuti zona waktu
-            perangkat Anda.
+            {isCheckIn
+              ? "Tidak boleh di masa depan dan harus sebelum jam pulang (paling lama 24 jam sebelumnya). Tidak boleh bertabrakan dengan sesi lain milik karyawan ini. Sesi yang belum absen pulang hanya bisa dipindah di hari yang sama. Waktu mengikuti zona waktu perangkat Anda."
+              : "Harus sesudah jam masuk, paling lama 24 jam sesudahnya, dan tidak boleh melewati jam masuk sesi berikutnya. Waktu mengikuti zona waktu perangkat Anda."}
           </p>
         </div>
 
@@ -422,7 +548,17 @@ function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
           </p>
         )}
 
-        {record.check_out_at && (
+        {isCheckIn && record.check_out_at && (
+          <p className="mt-4 rounded-xl border border-second/30 p-4 text-xs leading-relaxed text-second/60">
+            <span className="font-semibold text-second">
+              Menggeser seluruh shift?
+            </span>{" "}
+            Ke lebih siang: ubah jam pulang dulu, lalu jam masuk. Ke lebih pagi:
+            ubah jam masuk dulu, lalu jam pulang.
+          </p>
+        )}
+
+        {!isCheckIn && record.check_out_at && (
           <div className="mt-4 rounded-xl border border-second/30 p-4">
             <p className="text-sm font-semibold text-second">
               Salah menekan absen pulang?
@@ -469,6 +605,8 @@ function EditDialog({ record, busy, apiError, onClose, onSave, onReopen }) {
                 />
                 Menyimpan…
               </>
+            ) : isCheckIn ? (
+              "Simpan jam masuk"
             ) : (
               "Simpan jam pulang"
             )}
@@ -488,7 +626,8 @@ export default function AttendancesPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const [employees, setEmployees] = useState({});
-  const [recordToEdit, setRecordToEdit] = useState(null);
+  // { record, mode: "check-in" | "check-out" } atau null
+  const [edit, setEdit] = useState(null);
   const [editError, setEditError] = useState("");
 
   const invalidRange = dateFrom !== "" && dateTo !== "" && dateFrom > dateTo;
@@ -501,7 +640,10 @@ export default function AttendancesPage() {
   });
   const { data, isPending, isError, isFetching, error, refetch } = query;
 
-  const updateMutation = useUpdateAttendance();
+  const updateCheckOutMutation = useUpdateAttendance();
+  const updateCheckInMutation = useUpdateAttendanceCheckIn();
+  const isSaving =
+    updateCheckOutMutation.isPending || updateCheckInMutation.isPending;
 
   useEffect(() => {
     if (!isError || !error) return;
@@ -575,33 +717,51 @@ export default function AttendancesPage() {
     setCurrentPage(1);
   }
 
-  function openEdit(record) {
+  function openEdit(record, mode) {
     setEditError("");
-    setRecordToEdit(record);
+    setEdit({ record, mode });
   }
 
-  async function submitCheckOut(value, successMessage) {
+  async function submitEdit({ mutation, payload, successMessage, errorMap }) {
     setEditError("");
 
     try {
-      await updateMutation.mutateAsync({
-        id: recordToEdit.id,
-        data: { check_out_at: value },
+      await mutation.mutateAsync({
+        id: edit.record.id,
+        data: payload,
       });
       notify.success(successMessage);
-      setRecordToEdit(null);
+      setEdit(null);
     } catch (err) {
       const code = err?.response?.data?.errors;
 
       if (code === "ATTENDANCE_NOT_FOUND") {
         notify.error("Data absen tidak ditemukan.");
-        setRecordToEdit(null);
+        setEdit(null);
         refetch();
         return;
       }
 
-      setEditError(PATCH_ERRORS[code] ?? normalizeApiError(err).message);
+      setEditError(errorMap[code] ?? normalizeApiError(err).message);
     }
+  }
+
+  function saveCheckIn(iso) {
+    return submitEdit({
+      mutation: updateCheckInMutation,
+      payload: { check_in_at: iso },
+      successMessage: "Jam masuk disimpan.",
+      errorMap: CHECKIN_ERRORS,
+    });
+  }
+
+  function saveCheckOut(value, successMessage) {
+    return submitEdit({
+      mutation: updateCheckOutMutation,
+      payload: { check_out_at: value },
+      successMessage,
+      errorMap: CHECKOUT_ERRORS,
+    });
   }
 
   if (isPending) {
@@ -989,7 +1149,7 @@ export default function AttendancesPage() {
                           <StatusTag status={record.status} />
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <EditButton record={record} onClick={openEdit} />
+                          <RecordActions record={record} onEdit={openEdit} />
                         </td>
                       </tr>
                     ))}
@@ -1039,7 +1199,7 @@ export default function AttendancesPage() {
                     </dl>
 
                     <div>
-                      <EditButton record={record} onClick={openEdit} />
+                      <RecordActions record={record} onEdit={openEdit} />
                     </div>
                   </article>
                 </li>
@@ -1108,17 +1268,22 @@ export default function AttendancesPage() {
         </nav>
       )}
 
-      {recordToEdit && (
+      {edit && (
         <EditDialog
-          key={recordToEdit.id}
-          record={recordToEdit}
-          busy={updateMutation.isPending}
+          key={`${edit.record.id}-${edit.mode}`}
+          record={edit.record}
+          mode={edit.mode}
+          busy={isSaving}
           apiError={editError}
           onClose={() => {
-            if (!updateMutation.isPending) setRecordToEdit(null);
+            if (!isSaving) setEdit(null);
           }}
-          onSave={(iso) => submitCheckOut(iso, "Jam pulang disimpan.")}
-          onReopen={() => submitCheckOut(null, "Sesi dibuka kembali.")}
+          onSave={(iso) =>
+            edit.mode === "check-in"
+              ? saveCheckIn(iso)
+              : saveCheckOut(iso, "Jam pulang disimpan.")
+          }
+          onReopen={() => saveCheckOut(null, "Sesi dibuka kembali.")}
         />
       )}
     </div>

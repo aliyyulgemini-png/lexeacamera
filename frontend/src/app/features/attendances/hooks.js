@@ -11,6 +11,7 @@ import {
   getAttendances,
   getMyIp,
   updateAttendance,
+  updateAttendanceCheckIn,
   updateAttendanceDevice,
   updateAttendanceNetwork,
   updateAttendanceSettings,
@@ -156,5 +157,13 @@ export function useDeleteAttendanceDevice() {
   return useMutation({
     mutationFn: (id) => deleteAttendanceDevice(id),
     onSuccess: () => invalidateDeviceRelated(queryClient),
+  });
+}
+export function useUpdateAttendanceCheckIn() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => updateAttendanceCheckIn(id, data), // PUT /owner/attendances/:id/check-in
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["attendances"] }),
   });
 }

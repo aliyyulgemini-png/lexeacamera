@@ -44,7 +44,9 @@ const assertNetworkAllowed = async (ip) => {
   const cidrs = [
     ...networks.map((network) => network.cidr),
     ...devices.flatMap((device) =>
-      [device.ip_v4 ? `${device.ip_v4}/32` : null, device.ip_v6].filter(Boolean),
+      [device.ip_v4 ? `${device.ip_v4}/32` : null, device.ip_v6].filter(
+        Boolean,
+      ),
     ),
   ];
 
@@ -142,7 +144,11 @@ const withEmployeeLock = (employeeId, action) =>
 
 const findOpen = (tx, employeeId) =>
   tx.attendance.findFirst({
-    where: { employee_id: employeeId, check_out_at: null, missed_checkout: false },
+    where: {
+      employee_id: employeeId,
+      check_out_at: null,
+      missed_checkout: false,
+    },
     orderBy: { check_in_at: "desc" },
     select: { id: true, check_in_at: true },
   });
@@ -188,7 +194,10 @@ const checkIn = async (request) => {
     const attendedToday = await tx.attendance.findFirst({
       where: {
         employee_id: employee.id,
-        check_in_at: { gte: dayStart, lt: new Date(dayStart.getTime() + DAY_MS) },
+        check_in_at: {
+          gte: dayStart,
+          lt: new Date(dayStart.getTime() + DAY_MS),
+        },
       },
       select: { id: true },
     });
@@ -262,4 +271,53 @@ const myIp = (request) => {
   return info;
 };
 
-export default { getEmployees, checkIn, checkOut, myIp };
+const getToday = async (request) => {
+  await assertNetworkAllowed(request.ip);
+
+  const today = wibDay(new Date());
+  const dayStart = new Date(`${today}T00:00:00+07:00`);
+  const dayEnd = new Date(dayStart.getTime() + DAY_MS);
+
+  const employees = await prisma.employee.findMany({
+    where: {
+      is_active: true,
+      pin_hash: { not: null },
+      OR: [{ email_verified_at: { not: null } }, { user_id: { not: null } }],
+    },
+    select: {
+      id: true,
+      name: true,
+      attendances: {
+        where: { check_in_at: { gte: dayStart, lt: dayEnd } },
+        orderBy: { check_in_at: "desc" },
+        take: 1,
+        select: { check_in_at: true, check_out_at: true },
+      },
+    },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+  });
+
+  const summary = { total: employees.length, working: 0, done: 0, not_yet: 0 };
+
+  const list = employees.map(({ attendances, ...employee }) => {
+    const attendance = attendances[0];
+
+    let status = "NOT_YET";
+    if (attendance?.check_out_at) status = "DONE";
+    else if (attendance) status = "WORKING";
+
+    summary[status.toLowerCase()]++;
+
+    return {
+      id: employee.id,
+      name: employee.name,
+      status,
+      check_in_at: attendance?.check_in_at ?? null,
+      check_out_at: attendance?.check_out_at ?? null,
+    };
+  });
+
+  return { date: today, summary, employees: list };
+};
+
+export default { getEmployees, getToday, checkIn, checkOut, myIp };
