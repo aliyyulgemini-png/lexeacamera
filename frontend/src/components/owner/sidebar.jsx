@@ -35,7 +35,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLogoutCurrentUser } from "../../app/features/users/hooks.js";
 import { normalizeApiError } from "../../lib/api/errors.js";
 import notify from "../../lib/notify.js";
-import { GrUserManager } from "react-icons/gr";
+import { GrSchedule, GrUserManager } from "react-icons/gr";
 import { HiOutlineUserCircle } from "react-icons/hi";
 import { LuUserRoundCheck } from "react-icons/lu";
 import { TbReportSearch } from "react-icons/tb";
@@ -122,6 +122,12 @@ const navigation = [
     group: "Tim",
   },
   {
+    label: "Jadwal",
+    href: "/owner/schedules",
+    icon: GrSchedule,
+    group: "Tim",
+  },
+  {
     label: "Kasir",
     href: "/owner/daily-reports",
     icon: FaCashRegister,
@@ -175,6 +181,7 @@ const pageTitles = {
   "/owner/quality-controls": "Quality Control",
   "/owner/invoices": "Invoice",
   "/owner/daily-reports": "Kasir",
+  "/owner/schedules": "Jadwal",
   "/owner/customers": "Pelanggan",
   "/owner/orders": "Pesanan",
   "/owner/marketplaces": "Toko Online",

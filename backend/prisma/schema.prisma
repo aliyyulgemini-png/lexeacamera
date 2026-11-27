@@ -30,6 +30,13 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum ScheduleItemCategory {
+  SHIFT // jam kerja (P, S, S3, LP, LS, PIK)
+  LEAVE // cuti / izin (AL)
+  OFF // libur (OFF)
+  OTHER // lainnya (training, dinas luar, dll)
+}
+
 enum EntryMethod {
   CASH
   NON_CASH
@@ -318,6 +325,8 @@ model Employee {
   pin_locked_until  DateTime?
   contracts         EmployeeContract[]
   payrolls          Payroll[]
+
+  scheduleEmployees ScheduleEmployee[]
 }
 
 model EmployeeContract {
@@ -551,4 +560,67 @@ model AttendanceDevice {
   last_seen_at  DateTime?
   ip_changed_at DateTime?
   created_at    DateTime  @default(now())
+}
+
+model ScheduleItem {
+  id              String               @id @default(uuid())
+  code            String               @unique @db.VarChar(10) // "P", "AL", "OFF"
+  name            String               @db.VarChar(100) // "Shift Pagi"
+  category        ScheduleItemCategory @default(SHIFT)
+  start_time      String?              @db.VarChar(5) // "09:00"
+  end_time        String?              @db.VarChar(5) // "17:00"
+  color           String               @default("#FFFFFF") @db.VarChar(7) // warna latar sel
+  text_color      String               @default("#000000") @db.VarChar(7) // warna teks sel
+  show_in_summary Boolean              @default(false) // tampil di kolom rekap kanan (OFF/PIK/AL)
+  sort_order      Int                  @default(0)
+  is_active       Boolean              @default(true)
+  created_at      DateTime             @default(now())
+  updated_at      DateTime             @updatedAt
+  entries         ScheduleEntry[]
+
+  @@map("schedule_items")
+}
+
+// Header jadwal: 1 jadwal = 1 bulan
+model Schedule {
+  id         String             @id @default(uuid())
+  month      String             @unique @db.VarChar(7) // "2026-12"
+  title      String             @db.VarChar(150) // "SCHEDULE DESEMBER 2026"
+  notes      String?            @db.Text
+  created_at DateTime           @default(now())
+  updated_at DateTime           @updatedAt
+  employees  ScheduleEmployee[]
+
+  @@map("schedules")
+}
+
+// Baris tabel: karyawan yang ikut dalam suatu jadwal
+model ScheduleEmployee {
+  id          String          @id @default(uuid())
+  schedule_id String
+  employee_id String
+  sort_order  Int             @default(0)
+  created_at  DateTime        @default(now())
+  schedule    Schedule        @relation(fields: [schedule_id], references: [id], onDelete: Cascade)
+  employee    Employee        @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  entries     ScheduleEntry[]
+
+  @@unique([schedule_id, employee_id])
+  @@map("schedule_employees")
+}
+
+// Isi sel: 1 karyawan x 1 tanggal = 1 item. Sel kosong = tidak ada baris.
+model ScheduleEntry {
+  id                   String           @id @default(uuid())
+  schedule_employee_id String
+  date                 DateTime         @db.Date
+  schedule_item_id     String
+  created_at           DateTime         @default(now())
+  updated_at           DateTime         @updatedAt
+  scheduleEmployee     ScheduleEmployee @relation(fields: [schedule_employee_id], references: [id], onDelete: Cascade)
+  item                 ScheduleItem     @relation(fields: [schedule_item_id], references: [id], onDelete: Restrict)
+
+  @@unique([schedule_employee_id, date])
+  @@index([schedule_item_id])
+  @@map("schedule_entries")
 }

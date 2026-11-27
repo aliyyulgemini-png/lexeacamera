@@ -25,6 +25,8 @@ import payrollController from "../controller/owner/payroll-controller.js";
 import contractController from "../controller/owner/contract-controller.js";
 import cameraBulkDeleteController from "../controller/owner/camera-bulk-delete-controller.js";
 import attendanceDeviceController from "../controller/owner/attendance-device-controller.js";
+import scheduleItemController from "../controller/owner/schedule-item-controller.js";
+import scheduleController from "../controller/owner/schedule-controller.js";
 
 const ownerRouter = express.Router();
 
@@ -90,6 +92,7 @@ ownerRouter.patch(
   orderController.updatePaymentStatus,
 );
 ownerRouter.post("/owner/employees", employeeController.create);
+ownerRouter.get("/owner/employees", employeeController.getAll);
 ownerRouter.get("/owner/employees/:id", employeeController.get);
 ownerRouter.put("/owner/employees/:id", employeeController.update);
 ownerRouter.post(
@@ -166,6 +169,40 @@ ownerRouter.put(
 ownerRouter.delete(
   "/owner/attendance-devices/:id",
   attendanceDeviceController.remove,
+);
+
+// ---------- Item jadwal (P, S, AL, OFF, ...) ----------
+ownerRouter.get("/owner/schedule-items", scheduleItemController.getAll);
+ownerRouter.get("/owner/schedule-items/:id", scheduleItemController.get);
+ownerRouter.post("/owner/schedule-items", scheduleItemController.create);
+ownerRouter.put("/owner/schedule-items/:id", scheduleItemController.update);
+ownerRouter.delete("/owner/schedule-items/:id", scheduleItemController.remove);
+
+// ---------- Jadwal bulanan ----------
+ownerRouter.get("/owner/schedules", scheduleController.getAll);
+ownerRouter.get("/owner/schedules/:id", scheduleController.get);
+ownerRouter.post("/owner/schedules", scheduleController.create);
+ownerRouter.put("/owner/schedules/:id", scheduleController.update);
+ownerRouter.delete("/owner/schedules/:id", scheduleController.remove);
+
+// Isi sel jadwal
+ownerRouter.put(
+  "/owner/schedules/:id/entries",
+  scheduleController.upsertEntries,
+);
+
+// Karyawan di dalam jadwal
+ownerRouter.post(
+  "/owner/schedules/:id/employees",
+  scheduleController.addEmployees,
+);
+ownerRouter.put(
+  "/owner/schedules/:id/employees/order",
+  scheduleController.reorderEmployees,
+);
+ownerRouter.delete(
+  "/owner/schedules/:id/employees/:employeeId",
+  scheduleController.removeEmployee,
 );
 
 export default ownerRouter;
