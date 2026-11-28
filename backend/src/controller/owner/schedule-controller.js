@@ -11,9 +11,7 @@ const getAll = async (req, res, next) => {
 
 const get = async (req, res, next) => {
   try {
-    const result = await scheduleService.getScheduleDetail({
-      id: req.params.id,
-    });
+    const result = await scheduleService.getScheduleDetail({ id: req.params.id });
     res.status(200).json(result);
   } catch (error) {
     next(error);
@@ -31,10 +29,7 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const result = await scheduleService.updateSchedule({
-      ...req.body,
-      id: req.params.id,
-    });
+    const result = await scheduleService.updateSchedule({ ...req.body, id: req.params.id });
     res.status(200).json({ data: result });
   } catch (error) {
     next(error);
@@ -52,10 +47,7 @@ const remove = async (req, res, next) => {
 
 const upsertEntries = async (req, res, next) => {
   try {
-    const result = await scheduleService.upsertEntries({
-      ...req.body,
-      id: req.params.id,
-    });
+    const result = await scheduleService.upsertEntries({ ...req.body, id: req.params.id });
     res.status(200).json({ data: result });
   } catch (error) {
     next(error);
@@ -64,10 +56,7 @@ const upsertEntries = async (req, res, next) => {
 
 const addEmployees = async (req, res, next) => {
   try {
-    const result = await scheduleService.addEmployees({
-      ...req.body,
-      id: req.params.id,
-    });
+    const result = await scheduleService.addEmployees({ ...req.body, id: req.params.id });
     res.status(201).json({ data: result });
   } catch (error) {
     next(error);
@@ -88,10 +77,7 @@ const removeEmployee = async (req, res, next) => {
 
 const reorderEmployees = async (req, res, next) => {
   try {
-    const result = await scheduleService.reorderEmployees({
-      ...req.body,
-      id: req.params.id,
-    });
+    const result = await scheduleService.reorderEmployees({ ...req.body, id: req.params.id });
     res.status(200).json({ data: result });
   } catch (error) {
     next(error);

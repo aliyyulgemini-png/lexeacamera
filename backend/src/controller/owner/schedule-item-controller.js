@@ -29,10 +29,7 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const result = await scheduleItemService.updateItem({
-      ...req.body,
-      id: req.params.id,
-    });
+    const result = await scheduleItemService.updateItem({ ...req.body, id: req.params.id });
     res.status(200).json({ data: result });
   } catch (error) {
     next(error);

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ExportScheduleButton from "../../../../../components/owner/export-schedule-button.jsx";
 import Link from "next/link.js";
 import { useParams, useRouter } from "next/navigation.js";
 import {
@@ -56,12 +55,34 @@ import {
   labelClass,
 } from "../../../../../components/owner/schedule-shared.jsx";
 import notify from "../../../../../lib/notify.js";
+import ExportScheduleButton from "../../../../../components/owner/export-schedule-button.jsx";
 
 const ERASE = "__erase__";
 const FLUSH_DELAY = 500;
 const MAX_BATCH = 5000;
 
 const cellKey = (employeeId, date) => `${employeeId}|${date}`;
+
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "Mei",
+  "Jun",
+  "Jul",
+  "Agu",
+  "Sep",
+  "Okt",
+  "Nov",
+  "Des",
+];
+
+// "2026-12-25" -> "25 Des". Tanpa new Date() supaya tidak kena zona waktu.
+function formatShortDate(value) {
+  const [, month, day] = value.split("-").map(Number);
+  return `${day} ${SHORT_MONTHS[month - 1]}`;
+}
 
 function buildCells(rows = []) {
   const cells = {};
@@ -236,6 +257,11 @@ function AddEmployeesDialog({ scheduleId, existingIds, onClose }) {
       );
       onClose();
     } catch (err) {
+      // Ada karyawan yang sudah tidak ada di DB: muat ulang daftarnya.
+      if (err?.response?.status === 404) {
+        setSelected(new Set());
+        employeesQuery.refetch();
+      }
       setError(describeError(err));
     }
   }
@@ -838,6 +864,7 @@ export default function ScheduleEditorPage() {
   const dates = data.dates ?? [];
   const rows = data.rows ?? [];
   const summaryColumns = data.summary_columns ?? [];
+  const specialDates = data.special_dates ?? [];
   const status = STATUS_LABEL[data.status] ?? {
     label: data.status,
     tone: "outline",
@@ -888,6 +915,9 @@ export default function ScheduleEditorPage() {
               <h1 className="mt-2 break-words text-xl font-bold tracking-tight text-second sm:text-2xl">
                 {data.title}
               </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Tag tone={status.tone}>{status.label}</Tag>
+              </div>
             </div>
           </div>
 
@@ -909,7 +939,6 @@ export default function ScheduleEditorPage() {
               />
               Perbarui
             </button>
-
             <Link href={ITEMS_PATH} className={BTN_OUTLINE}>
               <FiSliders size={16} aria-hidden="true" />
               Kelola item
@@ -930,6 +959,21 @@ export default function ScheduleEditorPage() {
             >
               <FiEdit2 size={16} aria-hidden="true" />
               Ubah info
+            </button>
+            <button
+              type="button"
+              onClick={handleToggleStatus}
+              disabled={updateMutation.isPending}
+              className={isPublished ? BTN_OUTLINE : BTN_PRIMARY}
+            >
+              {updateMutation.isPending ? (
+                <Spinner />
+              ) : isPublished ? (
+                <FiEyeOff size={16} aria-hidden="true" />
+              ) : (
+                <FiEye size={16} aria-hidden="true" />
+              )}
+              {isPublished ? "Kembalikan ke draf" : "Publikasikan"}
             </button>
           </div>
         </div>
@@ -1056,7 +1100,12 @@ export default function ScheduleEditorPage() {
                     <th
                       key={day.date}
                       scope="col"
-                      className={`h-8 w-8 min-w-8 px-0 text-center font-semibold text-primary ${
+                      title={
+                        day.special_dates?.length
+                          ? day.special_dates.map((s) => s.name).join(", ")
+                          : undefined
+                      }
+                      className={`h-8 w-8 min-w-8 px-0 text-center align-top font-semibold text-primary ${
                         day.is_sunday ? "bg-second2" : "bg-second"
                       }`}
                     >
@@ -1064,6 +1113,21 @@ export default function ScheduleEditorPage() {
                       <span className="block text-[10px] font-normal leading-none opacity-80">
                         {WEEKDAYS[day.weekday]}
                       </span>
+                      {day.special_dates?.length > 0 && (
+                        <span className="mt-0.5 flex justify-center gap-0.5">
+                          {day.special_dates.map((special) => (
+                            <span
+                              key={special.id}
+                              aria-hidden="true"
+                              className="size-1.5 rounded-full ring-1 ring-primary"
+                              style={{ backgroundColor: special.color }}
+                            />
+                          ))}
+                          <span className="sr-only">
+                            {day.special_dates.map((s) => s.name).join(", ")}
+                          </span>
+                        </span>
+                      )}
                     </th>
                   ))}
 
@@ -1156,6 +1220,27 @@ export default function ScheduleEditorPage() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {specialDates.length > 0 && (
+          <ul
+            aria-label="Tanggal spesial"
+            className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-second/70"
+          >
+            {specialDates.map((special) => (
+              <li
+                key={`${special.id}-${special.date}`}
+                className="flex items-center gap-2"
+              >
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: special.color }}
+                />
+                {formatShortDate(special.date)}: {special.name}
+              </li>
+            ))}
+          </ul>
         )}
 
         <p className="text-xs text-second/60">

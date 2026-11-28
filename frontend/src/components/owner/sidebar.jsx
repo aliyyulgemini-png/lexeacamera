@@ -18,6 +18,7 @@ import {
   FiUsers,
 } from "react-icons/fi";
 import {
+  MdFormatListBulleted,
   MdHighQuality,
   MdOutlineFactCheck,
   MdOutlineShoppingCart,
@@ -125,6 +126,12 @@ const navigation = [
     label: "Jadwal",
     href: "/owner/schedules",
     icon: GrSchedule,
+    group: "Tim",
+  },
+  {
+    label: "Form Jadwal",
+    href: "/owner/schedule-request-forms",
+    icon: MdFormatListBulleted,
     group: "Tim",
   },
   {

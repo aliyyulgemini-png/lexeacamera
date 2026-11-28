@@ -1,9 +1,9 @@
-// Sesuaikan 3 import di bawah dengan path di project kamu
 import { prisma } from "../../lib/database.js";
 import { validate } from "../../validation/validation.js";
 import { ResponseError } from "../../error/response-error.js";
 import { EMPLOYEE_SELECT, MONTH_NAMES } from "./schedule-config.js";
 import { ITEM_SELECT, ITEM_ORDER } from "./schedule-item-service.js";
+import { applyApprovedRequests, getSpecialDatesForMonth, attachSpecialDates } from "./schedule-helper.js";
 import {
   idValidation,
   getAllScheduleValidation,
@@ -20,6 +20,7 @@ const SCHEDULE_SELECT = {
   month: true,
   title: true,
   notes: true,
+  status: true,
   created_at: true,
   updated_at: true,
 };
@@ -71,6 +72,7 @@ const getSchedules = async (request) => {
 
   const where = {};
   if (req.year) where.month = { startsWith: `${req.year}-` };
+  if (req.status) where.status = req.status;
 
   const schedules = await prisma.schedule.findMany({
     where,
@@ -91,7 +93,7 @@ const getScheduleDetail = async (request) => {
   const schedule = await findScheduleOrFail(id);
   const { daysInMonth, dates } = monthInfo(schedule.month);
 
-  const [rows, activeItems] = await Promise.all([
+  const [rows, activeItems, specials] = await Promise.all([
     prisma.scheduleEmployee.findMany({
       where: { schedule_id: id },
       select: {
@@ -105,6 +107,7 @@ const getScheduleDetail = async (request) => {
       orderBy: [{ sort_order: "asc" }, { created_at: "asc" }],
     }),
     prisma.scheduleItem.findMany({ where: { is_active: true }, select: ITEM_SELECT, orderBy: ITEM_ORDER }),
+    getSpecialDatesForMonth(schedule.month),
   ]);
 
   // Item nonaktif yang masih terpakai di jadwal ini tetap dikirim supaya sel bisa diwarnai
@@ -141,7 +144,8 @@ const getScheduleDetail = async (request) => {
     data: {
       ...schedule,
       days_in_month: daysInMonth,
-      dates,
+      dates: attachSpecialDates(dates, specials),
+      special_dates: specials,
       items,
       summary_columns: summaryItems.map((i) => i.code),
       rows: data,
@@ -175,6 +179,9 @@ const createSchedule = async (request) => {
     },
     select: { id: true },
   });
+
+  // Request yang sudah di-APPROVE owner untuk bulan ini langsung masuk ke sel
+  await applyApprovedRequests({ month: req.month });
 
   return getScheduleDetail({ id: schedule.id }).then((r) => r.data);
 };

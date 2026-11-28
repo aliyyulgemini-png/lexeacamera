@@ -37,6 +37,22 @@ enum ScheduleItemCategory {
   OTHER // lainnya (training, dinas luar, dll)
 }
 
+enum ScheduleStatus {
+  DRAFT // masih disusun owner, admin belum bisa lihat
+  PUBLISHED // sudah jadi, admin bisa lihat
+}
+
+enum ScheduleRequestFormStatus {
+  OPEN // admin bisa mengirim request
+  CLOSED // ditutup owner, tidak bisa kirim request lagi
+}
+
+enum ScheduleRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum EntryMethod {
   CASH
   NON_CASH
@@ -327,6 +343,7 @@ model Employee {
   payrolls          Payroll[]
 
   scheduleEmployees ScheduleEmployee[]
+  scheduleRequests  ScheduleRequest[]
 }
 
 model EmployeeContract {
@@ -577,6 +594,7 @@ model ScheduleItem {
   created_at      DateTime             @default(now())
   updated_at      DateTime             @updatedAt
   entries         ScheduleEntry[]
+  requests        ScheduleRequest[]
 
   @@map("schedule_items")
 }
@@ -587,6 +605,7 @@ model Schedule {
   month      String             @unique @db.VarChar(7) // "2026-12"
   title      String             @db.VarChar(150) // "SCHEDULE DESEMBER 2026"
   notes      String?            @db.Text
+  status     ScheduleStatus     @default(DRAFT)
   created_at DateTime           @default(now())
   updated_at DateTime           @updatedAt
   employees  ScheduleEmployee[]
@@ -623,4 +642,59 @@ model ScheduleEntry {
   @@unique([schedule_employee_id, date])
   @@index([schedule_item_id])
   @@map("schedule_entries")
+}
+
+// Form request: dibuka owner untuk 1 bulan, muncul di akun admin
+model ScheduleRequestForm {
+  id                    String                    @id @default(uuid())
+  month                 String                    @unique @db.VarChar(7) // "2026-12"
+  title                 String                    @db.VarChar(150) // "REQUEST SCHEDULE DESEMBER 2026"
+  description           String?                   @db.Text // aturan/keterangan dari owner
+  max_days_per_employee Int? // kuota hari per karyawan, null = bebas
+  allowed_item_ids      String[] // item yang boleh di-request, kosong = semua item aktif
+  employee_ids          String[] // baris tabel form (urutan = urutan baris)
+  closes_at             DateTime? // batas pengisian, null = sampai ditutup manual
+  status                ScheduleRequestFormStatus @default(OPEN)
+  created_at            DateTime                  @default(now())
+  updated_at            DateTime                  @updatedAt
+  requests              ScheduleRequest[]
+
+  @@map("schedule_request_forms")
+}
+
+// Request dari admin/karyawan: 1 karyawan x 1 tanggal per form
+model ScheduleRequest {
+  id               String                @id @default(uuid())
+  form_id          String
+  employee_id      String
+  date             DateTime              @db.Date
+  schedule_item_id String
+  note             String?               @db.VarChar(500) // alasan dari karyawan
+  status           ScheduleRequestStatus @default(PENDING)
+  owner_note       String?               @db.VarChar(500) // catatan owner saat approve/reject
+  reviewed_at      DateTime?
+  created_at       DateTime              @default(now())
+  updated_at       DateTime              @updatedAt
+  form             ScheduleRequestForm   @relation(fields: [form_id], references: [id], onDelete: Cascade)
+  employee         Employee              @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  item             ScheduleItem          @relation(fields: [schedule_item_id], references: [id], onDelete: Restrict)
+
+  @@unique([form_id, employee_id, date])
+  @@index([employee_id])
+  @@map("schedule_requests")
+}
+
+// Tanggal spesial: hari besar, tanggal kembar, event toko, dll.
+// Ditampilkan sebagai titik di header tanggal + keterangan di bawah tabel.
+model SpecialDate {
+  id         String   @id @default(uuid())
+  date       DateTime @db.Date // untuk is_yearly, tahunnya diabaikan
+  name       String   @db.VarChar(100) // "Natal", "12.12", "Promo Akhir Tahun"
+  color      String   @default("#E53935") @db.VarChar(7) // warna titik
+  is_yearly  Boolean  @default(false) // true = berulang tiap tahun (Natal, 12.12)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([date])
+  @@map("special_dates")
 }

@@ -57,7 +57,14 @@ function CreateScheduleDialog({ onClose }) {
   const [selected, setSelected] = useState(() => new Set());
   const [initialized, setInitialized] = useState(false);
   const [errors, setErrors] = useState({});
-  const [existingId, setExistingId] = useState(null);
+  const [conflictId, setConflictId] = useState(null);
+
+  // Satu bulan hanya satu jadwal: cek jadwal di tahun yang dipilih.
+  const yearQuery = useGetSchedules({ year: month.slice(0, 4), status: "" });
+  const existing = (yearQuery.data ?? []).find(
+    (schedule) => schedule.month === month,
+  );
+  const existingId = existing?.id ?? conflictId;
 
   const employees = useMemo(
     () => employeesQuery.data ?? [],
@@ -81,7 +88,15 @@ function CreateScheduleDialog({ onClose }) {
     );
   }, [employees, search]);
 
+  // Hanya id yang masih ada di daftar karyawan. Urutan baris mengikuti daftar.
+  const selectedIds = employees
+    .filter((employee) => selected.has(employee.id))
+    .map((employee) => employee.id);
+
   const busy = createMutation.isPending;
+  const monthError =
+    errors.month ??
+    (existing && !busy ? `Jadwal ${formatMonth(month)} sudah ada.` : undefined);
 
   function toggle(id) {
     setSelected((current) => {
@@ -102,27 +117,26 @@ function CreateScheduleDialog({ onClose }) {
       }
       return next;
     });
+    setErrors((current) => ({ ...current, employees: undefined }));
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (existing) return;
 
     const found = {};
 
     if (!MONTH_RE.test(month)) found.month = "Isi bulan dengan format YYYY-MM.";
-    if (selected.size === 0) found.employees = "Pilih minimal 1 karyawan.";
+    if (selectedIds.length === 0) found.employees = "Pilih minimal 1 karyawan.";
     if (title.trim().length > 150) found.title = "Judul maksimal 150 karakter.";
 
     setErrors(found);
-    setExistingId(null);
+    setConflictId(null);
     if (Object.keys(found).length > 0) return;
 
-    // Urutan baris mengikuti urutan daftar karyawan.
     const payload = {
       month,
-      employee_ids: employees
-        .filter((employee) => selected.has(employee.id))
-        .map((employee) => employee.id),
+      employee_ids: selectedIds,
       ...(title.trim() && { title: title.trim() }),
       ...(notes.trim() && { notes: notes.trim() }),
     };
@@ -132,13 +146,24 @@ function CreateScheduleDialog({ onClose }) {
       notify.success("Jadwal dibuat.");
       router.push(`${SCHEDULES_PATH}/${schedule.id}`);
     } catch (error) {
-      if (error?.response?.status === 409) {
-        setExistingId(extractUuid(error));
-        setErrors({
-          month: `Jadwal ${formatMonth(month)} sudah ada.`,
-        });
+      const code = error?.response?.status;
+
+      if (code === 409) {
+        setErrors({ month: `Jadwal ${formatMonth(month)} sudah ada.` });
+
+        // Id diambil dari pesan error, atau dicari lewat daftar per tahun.
+        let id = extractUuid(error);
+        if (!id) {
+          const result = await yearQuery.refetch();
+          id = result.data?.find((schedule) => schedule.month === month)?.id;
+        }
+        setConflictId(id ?? null);
         return;
       }
+
+      // Ada karyawan yang sudah tidak ada di DB: muat ulang daftarnya.
+      if (code === 404) employeesQuery.refetch();
+
       setErrors({ form: describeError(error) });
     }
   }
@@ -155,8 +180,9 @@ function CreateScheduleDialog({ onClose }) {
           Buat jadwal baru
         </h2>
         <p className="mt-2 text-sm text-second/60">
-          Satu bulan hanya punya satu jadwal. Semua sel masih kosong setelah
-          dibuat.
+          Satu bulan hanya punya satu jadwal. Jadwal baru berstatus draf. Sel
+          masih kosong, kecuali yang terisi otomatis dari request yang sudah
+          disetujui.
         </p>
 
         <div className="mt-8 flex flex-col gap-4">
@@ -175,13 +201,13 @@ function CreateScheduleDialog({ onClose }) {
               placeholder="2026-12"
               onChange={(event) => {
                 setMonth(event.target.value);
-                setExistingId(null);
+                setConflictId(null);
                 setErrors((current) => ({ ...current, month: undefined }));
               }}
-              aria-invalid={errors.month ? "true" : undefined}
-              className={`${inputClass(Boolean(errors.month))} tabular-nums`}
+              aria-invalid={monthError ? "true" : undefined}
+              className={`${inputClass(Boolean(monthError))} tabular-nums`}
             />
-            {errors.month && <ErrorText>{errors.month}</ErrorText>}
+            {monthError && <ErrorText>{monthError}</ErrorText>}
             {existingId && (
               <Link
                 href={`${SCHEDULES_PATH}/${existingId}`}
@@ -245,7 +271,7 @@ function CreateScheduleDialog({ onClose }) {
                 </span>
               </p>
               <Tag tone="soft">
-                {selected.size}/{employees.length} dipilih
+                {selectedIds.length}/{employees.length} dipilih
               </Tag>
             </div>
 
@@ -348,7 +374,7 @@ function CreateScheduleDialog({ onClose }) {
           </button>
           <button
             type="submit"
-            disabled={busy || employeesQuery.isPending}
+            disabled={busy || employeesQuery.isPending || Boolean(existing)}
             aria-busy={busy}
             className={`${BTN_PRIMARY} w-full sm:w-auto`}
           >
@@ -410,6 +436,10 @@ export default function SchedulesPage() {
           <Link href={ITEMS_PATH} className={BTN_OUTLINE}>
             <FiSliders size={16} aria-hidden="true" />
             Item jadwal
+          </Link>
+          <Link href="/owner/special-dates" className={BTN_OUTLINE}>
+            <FiCalendar size={16} aria-hidden="true" />
+            Hari spesial
           </Link>
           <button
             type="button"
@@ -578,6 +608,7 @@ export default function SchedulesPage() {
                   )}
 
                   <div className="mt-auto flex flex-wrap items-center gap-2">
+                    <Tag tone={status.tone}>{status.label}</Tag>
                     <Tag tone="soft">
                       <FiUsers size={12} aria-hidden="true" />
                       <span className="ml-2 tabular-nums">

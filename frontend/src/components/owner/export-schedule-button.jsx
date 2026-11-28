@@ -5,7 +5,6 @@ import { FiDownload } from "react-icons/fi";
 
 import {
   BTN_OUTLINE,
-  STATUS_LABEL,
   Spinner,
   WEEKDAYS,
   categoryLabel,
@@ -19,56 +18,46 @@ import notify from "../../lib/notify.js";
 
 /* Palet sama dengan export laporan harian: marun tua dan marun. */
 const COLORS = {
-  dark: "FF3A0718",
-  accent: "FF6C1B30",
-  onDark: "FFF0DAE1",
-  white: "FFFFFFFF",
-  title: "FF3A0718",
-  muted: "FF666666",
-  border: "FFD9D9D9",
-  sunday: "FFB91C1C",
-  sundayTint: "FFFDECEC",
-  rowTint: "FFFAF1F4",
+  dark: "#3A0718",
+  accent: "#6C1B30",
+  onDark: "#F0DAE1",
+  white: "#FFFFFF",
+  black: "#000000",
+  muted: "#666666",
+  border: "#D9D9D9",
+  sunday: "#B91C1C",
+  sundayTint: "#FDECEC",
+  rowTint: "#FAF1F4",
 };
 
-const BORDER = {
-  top: { style: "thin", color: { argb: COLORS.border } },
-  left: { style: "thin", color: { argb: COLORS.border } },
-  bottom: { style: "thin", color: { argb: COLORS.border } },
-  right: { style: "thin", color: { argb: COLORS.border } },
-};
+const MARGIN = 8; // mm
+const NO_WIDTH = 7;
+const NAME_WIDTH = 34;
+const SUMMARY_WIDTH = 8;
 
-const FIRST_DAY_COL = 3; // kolom A = No, B = Nama
-const WEEKDAY_ROW = 5;
-const DAY_ROW = 6;
-const FIRST_DATA_ROW = 7;
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "Mei",
+  "Jun",
+  "Jul",
+  "Agu",
+  "Sep",
+  "Okt",
+  "Nov",
+  "Des",
+];
 
 /* -------------------------------- Helpers --------------------------------- */
 
-const solid = (argb) => ({
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb },
-});
+const toColor = (hex, fallback) =>
+  /^#[0-9A-Fa-f]{6}$/.test(hex ?? "") ? hex : fallback;
 
-// "#RRGGBB" -> "FFRRGGBB"
-function toArgb(hex, fallback) {
-  return /^#[0-9A-Fa-f]{6}$/.test(hex ?? "")
-    ? `FF${hex.slice(1).toUpperCase()}`
-    : fallback;
-}
-
-function colLetter(number) {
-  let result = "";
-  let n = number;
-
-  while (n > 0) {
-    const remainder = (n - 1) % 26;
-    result = String.fromCharCode(65 + remainder) + result;
-    n = Math.floor((n - 1) / 26);
-  }
-
-  return result;
+function formatShortDate(value) {
+  const [, month, day] = value.split("-").map(Number);
+  return `${day} ${SHORT_MONTHS[month - 1]}`;
 }
 
 function timestamp() {
@@ -82,41 +71,18 @@ function timestamp() {
   })} WIB`;
 }
 
-function styleHeader(cell, { sunday = false, left = false } = {}) {
-  cell.fill = solid(sunday ? COLORS.sunday : COLORS.dark);
-  cell.font = { bold: true, size: 10, color: { argb: COLORS.white } };
-  cell.alignment = {
-    vertical: "middle",
-    horizontal: left ? "left" : "center",
-    wrapText: true,
-  };
-  cell.border = BORDER;
-}
-
-async function download(workbook, filename) {
-  const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 /* --------------------------------- Export --------------------------------- */
 
-async function exportScheduleExcel(schedule, cells) {
-  const ExcelJS = (await import("exceljs")).default;
+async function exportSchedulePdf(schedule, cells) {
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
 
   const dates = schedule.dates ?? [];
   const rows = schedule.rows ?? [];
   const items = schedule.items ?? [];
+  const specialDates = schedule.special_dates ?? [];
   const summaryColumns = schedule.summary_columns ?? [];
   const itemById = Object.fromEntries(items.map((item) => [item.id, item]));
 
@@ -124,243 +90,250 @@ async function exportScheduleExcel(schedule, cells) {
     throw new Error("Belum ada karyawan di jadwal ini.");
   }
 
-  const lastDayCol = FIRST_DAY_COL + dates.length - 1;
-  const summaryStartCol = lastDayCol + 1;
-  const lastCol = lastDayCol + summaryColumns.length;
-  const lastDataRow = FIRST_DATA_ROW + rows.length - 1;
-
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Jadwal Karyawan";
-  workbook.created = new Date();
-
-  const sheet = workbook.addWorksheet("Jadwal", {
-    views: [
-      {
-        state: "frozen",
-        xSplit: 2,
-        ySplit: DAY_ROW,
-        showGridLines: false,
-      },
-    ],
-    pageSetup: {
-      paperSize: 9,
-      orientation: "landscape",
-      fitToPage: true,
-      fitToWidth: 1,
-      fitToHeight: 0,
-      printTitlesRow: `${WEEKDAY_ROW}:${DAY_ROW}`,
-      margins: {
-        left: 0.3,
-        right: 0.3,
-        top: 0.5,
-        bottom: 0.5,
-        header: 0.3,
-        footer: 0.3,
-      },
-    },
-    headerFooter: { oddFooter: `&L${schedule.title}&RHalaman &P dari &N` },
-  });
-
-  sheet.getColumn(1).width = 5;
-  sheet.getColumn(2).width = 26;
-  for (let col = FIRST_DAY_COL; col <= lastDayCol; col += 1) {
-    sheet.getColumn(col).width = 4.6;
-  }
-  for (let col = summaryStartCol; col <= lastCol; col += 1) {
-    sheet.getColumn(col).width = 8;
-  }
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const width = pageWidth - MARGIN * 2;
 
   /* ------------------------------ Judul ---------------------------------- */
 
-  const status = STATUS_LABEL[schedule.status]?.label ?? schedule.status;
+  doc.setFillColor(COLORS.dark);
+  doc.rect(MARGIN, MARGIN, width, 16, "F");
+  doc.setFillColor(COLORS.accent);
+  doc.rect(MARGIN, MARGIN + 16, width, 1, "F");
 
-  sheet.mergeCells(1, 1, 1, lastCol);
-  const titleCell = sheet.getCell(1, 1);
-  titleCell.value = String(schedule.title ?? "JADWAL").toUpperCase();
-  titleCell.font = { size: 18, bold: true, color: { argb: COLORS.white } };
-  titleCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-  sheet.getRow(1).height = 32;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.setTextColor(COLORS.white);
+  doc.text(
+    String(schedule.title ?? "JADWAL").toUpperCase(),
+    MARGIN + 4,
+    MARGIN + 7,
+    {
+      maxWidth: width - 8,
+    },
+  );
 
-  sheet.mergeCells(2, 1, 2, lastCol);
-  const subtitleCell = sheet.getCell(2, 1);
-  subtitleCell.value = `${formatMonth(schedule.month)}  · Diekspor ${timestamp()}`;
-  subtitleCell.font = { size: 10, color: { argb: COLORS.onDark } };
-  subtitleCell.alignment = {
-    vertical: "middle",
-    horizontal: "left",
-    indent: 1,
-  };
-  sheet.getRow(2).height = 20;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(COLORS.onDark);
+  doc.text(
+    `${formatMonth(schedule.month)}  ·  Diekspor ${timestamp()}`,
+    MARGIN + 4,
+    MARGIN + 12.5,
+  );
 
-  for (let col = 1; col <= lastCol; col += 1) {
-    sheet.getCell(1, col).fill = solid(COLORS.dark);
-    sheet.getCell(2, col).fill = solid(COLORS.dark);
-  }
-
-  sheet.mergeCells(3, 1, 3, lastCol);
-  sheet.getCell(3, 1).fill = solid(COLORS.accent);
-  sheet.getRow(3).height = 4;
+  let top = MARGIN + 20;
 
   if (schedule.notes) {
-    sheet.mergeCells(4, 1, 4, lastCol);
-    const notesCell = sheet.getCell(4, 1);
-    notesCell.value = `Catatan: ${schedule.notes}`;
-    notesCell.font = { size: 10, italic: true, color: { argb: COLORS.muted } };
-    notesCell.alignment = {
-      vertical: "middle",
-      horizontal: "left",
-      wrapText: true,
-    };
-    sheet.getRow(4).height = 20;
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(COLORS.muted);
+    const lines = doc.splitTextToSize(`Catatan: ${schedule.notes}`, width);
+    doc.text(lines, MARGIN, top + 2);
+    top += lines.length * 3.5 + 2;
   }
 
-  /* ------------------------------ Header --------------------------------- */
+  /* ------------------------------ Tabel ---------------------------------- */
 
-  sheet.getRow(WEEKDAY_ROW).height = 16;
-  sheet.getRow(DAY_ROW).height = 18;
+  const dayWidth =
+    (width - NO_WIDTH - NAME_WIDTH - summaryColumns.length * SUMMARY_WIDTH) /
+    Math.max(dates.length, 1);
 
-  sheet.mergeCells(WEEKDAY_ROW, 1, DAY_ROW, 1);
-  sheet.getCell(WEEKDAY_ROW, 1).value = "No";
-  sheet.mergeCells(WEEKDAY_ROW, 2, DAY_ROW, 2);
-  sheet.getCell(WEEKDAY_ROW, 2).value = "Nama";
-
-  [1, 2].forEach((col) => {
-    styleHeader(sheet.getCell(WEEKDAY_ROW, col), { left: col === 2 });
-    styleHeader(sheet.getCell(DAY_ROW, col), { left: col === 2 });
+  const headStyle = (sunday) => ({
+    fillColor: sunday ? COLORS.sunday : COLORS.dark,
   });
 
-  dates.forEach((day, index) => {
-    const col = FIRST_DAY_COL + index;
+  const head = [
+    [
+      { content: "No", rowSpan: 2 },
+      { content: "Nama", rowSpan: 2, styles: { halign: "left" } },
+      ...dates.map((day) => ({
+        content: WEEKDAYS[day.weekday],
+        styles: {
+          ...headStyle(day.is_sunday),
+          fontStyle: "normal",
+          fontSize: 5,
+        },
+      })),
+      ...summaryColumns.map((code) => ({ content: code, rowSpan: 2 })),
+    ],
+    dates.map((day) => ({
+      content: String(day.day),
+      styles: { ...headStyle(day.is_sunday), valign: "top", minCellHeight: 6 },
+      specialDates: day.special_dates ?? [],
+    })),
+  ];
 
-    const weekdayCell = sheet.getCell(WEEKDAY_ROW, col);
-    weekdayCell.value = WEEKDAYS[day.weekday];
-    styleHeader(weekdayCell, { sunday: day.is_sunday });
-    weekdayCell.font = {
-      bold: false,
-      size: 8,
-      color: { argb: COLORS.white },
-    };
-
-    const dayCell = sheet.getCell(DAY_ROW, col);
-    dayCell.value = day.day;
-    styleHeader(dayCell, { sunday: day.is_sunday });
-  });
-
-  summaryColumns.forEach((code, index) => {
-    const col = summaryStartCol + index;
-
-    sheet.mergeCells(WEEKDAY_ROW, col, DAY_ROW, col);
-    sheet.getCell(WEEKDAY_ROW, col).value = code;
-    styleHeader(sheet.getCell(WEEKDAY_ROW, col));
-    styleHeader(sheet.getCell(DAY_ROW, col));
-  });
-
-  /* ------------------------------- Isi ----------------------------------- */
-
-  const firstDayLetter = colLetter(FIRST_DAY_COL);
-  const lastDayLetter = colLetter(lastDayCol);
-
-  rows.forEach((row, rowIndex) => {
-    const rowNumber = FIRST_DATA_ROW + rowIndex;
-    const excelRow = sheet.getRow(rowNumber);
-    excelRow.height = 20;
-
-    const numberCell = excelRow.getCell(1);
-    numberCell.value = rowIndex + 1;
-    numberCell.alignment = { vertical: "middle", horizontal: "center" };
-    numberCell.font = { size: 10, color: { argb: COLORS.muted } };
-    numberCell.border = BORDER;
-
-    const nameCell = excelRow.getCell(2);
-    nameCell.value = row.employee?.name ?? "—";
-    nameCell.alignment = { vertical: "middle", horizontal: "left" };
-    nameCell.font = { bold: true, size: 10, color: { argb: COLORS.title } };
-    nameCell.border = BORDER;
-
+  const body = rows.map((row, index) => {
     const counts = Object.fromEntries(summaryColumns.map((code) => [code, 0]));
 
-    dates.forEach((day, dayIndex) => {
-      const cell = excelRow.getCell(FIRST_DAY_COL + dayIndex);
+    const dayCells = dates.map((day) => {
       const item = itemById[cells[`${row.employee.id}|${day.date}`]];
 
-      if (item) {
-        cell.value = item.code;
-        cell.fill = solid(toArgb(item.color, COLORS.white));
-        cell.font = {
-          bold: true,
-          size: 10,
-          color: { argb: toArgb(item.text_color, "FF000000") },
+      if (!item) {
+        return {
+          content: "",
+          styles: day.is_sunday ? { fillColor: COLORS.sundayTint } : {},
         };
-
-        if (item.code in counts) counts[item.code] += 1;
-      } else if (day.is_sunday) {
-        cell.fill = solid(COLORS.sundayTint);
       }
 
-      cell.alignment = { vertical: "middle", horizontal: "center" };
-      cell.border = BORDER;
-    });
+      if (item.code in counts) counts[item.code] += 1;
 
-    summaryColumns.forEach((code, index) => {
-      const cell = excelRow.getCell(summaryStartCol + index);
-      const safeCode = String(code).replace(/"/g, '""');
-
-      cell.value = {
-        formula: `COUNTIF(${firstDayLetter}${rowNumber}:${lastDayLetter}${rowNumber},"${safeCode}")`,
-        result: counts[code],
+      return {
+        content: item.code,
+        styles: {
+          fillColor: toColor(item.color, COLORS.white),
+          textColor: toColor(item.text_color, COLORS.black),
+          fontStyle: "bold",
+        },
       };
-      cell.numFmt = "0";
-      cell.fill = solid(COLORS.rowTint);
-      cell.font = { bold: true, size: 10, color: { argb: COLORS.title } };
-      cell.alignment = { vertical: "middle", horizontal: "center" };
-      cell.border = BORDER;
     });
+
+    return [
+      index + 1,
+      {
+        content: row.employee?.name ?? "-",
+        styles: { halign: "left", fontStyle: "bold", overflow: "ellipsize" },
+      },
+      ...dayCells,
+      ...summaryColumns.map((code) => ({
+        content: String(counts[code]),
+        styles: { fillColor: COLORS.rowTint, fontStyle: "bold" },
+      })),
+    ];
+  });
+
+  const columnStyles = {
+    0: { cellWidth: NO_WIDTH },
+    1: { cellWidth: NAME_WIDTH },
+  };
+  dates.forEach((_, index) => {
+    columnStyles[2 + index] = { cellWidth: dayWidth };
+  });
+  summaryColumns.forEach((_, index) => {
+    columnStyles[2 + dates.length + index] = { cellWidth: SUMMARY_WIDTH };
+  });
+
+  autoTable(doc, {
+    startY: top,
+    head,
+    body,
+    theme: "grid",
+    margin: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: 12 },
+    rowPageBreak: "avoid",
+    styles: {
+      fontSize: 6,
+      cellPadding: 0.4,
+      halign: "center",
+      valign: "middle",
+      textColor: COLORS.dark,
+      lineColor: COLORS.border,
+      lineWidth: 0.15,
+      minCellHeight: 6,
+      overflow: "hidden",
+    },
+    headStyles: {
+      fillColor: COLORS.dark,
+      textColor: COLORS.white,
+      minCellHeight: 4,
+    },
+    columnStyles,
+    // Titik hari besar di header tanggal.
+    didDrawCell: ({ section, cell }) => {
+      const marks = cell.raw?.specialDates;
+      if (section !== "head" || !marks?.length) return;
+
+      const start = cell.x + cell.width / 2 - ((marks.length - 1) * 1.5) / 2;
+      doc.setDrawColor(COLORS.white);
+      doc.setLineWidth(0.2);
+
+      marks.forEach((special, index) => {
+        doc.setFillColor(toColor(special.color, "#E53935"));
+        doc.circle(start + index * 1.5, cell.y + cell.height - 1.3, 0.7, "FD");
+      });
+    },
   });
 
   /* ------------------------------ Legenda -------------------------------- */
 
-  let legendRow = lastDataRow + 2;
+  const legendOptions = {
+    theme: "plain",
+    rowPageBreak: "avoid",
+    margin: { left: MARGIN, right: MARGIN, bottom: 12 },
+    styles: { fontSize: 7, cellPadding: 1, textColor: COLORS.dark },
+    headStyles: { fontStyle: "bold", fontSize: 8 },
+  };
 
-  sheet.mergeCells(legendRow, 1, legendRow, lastCol);
-  const legendTitle = sheet.getCell(legendRow, 1);
-  legendTitle.value = "Keterangan";
-  legendTitle.font = { bold: true, size: 11, color: { argb: COLORS.title } };
-  legendTitle.alignment = { vertical: "middle", horizontal: "left" };
-  legendRow += 1;
+  if (specialDates.length > 0) {
+    autoTable(doc, {
+      ...legendOptions,
+      startY: doc.lastAutoTable.finalY + 4,
+      head: [[{ content: "Hari spesial", colSpan: 2 }]],
+      body: specialDates.map((special) => [
+        formatShortDate(special.date),
+        { content: special.name, special },
+      ]),
+      columnStyles: {
+        0: { cellWidth: 18, cellPadding: { left: 5, top: 1, bottom: 1 } },
+      },
+      didDrawCell: ({ section, column, row, cell }) => {
+        if (section !== "body" || column.index !== 0) return;
+        doc.setFillColor(toColor(row.raw[1].special.color, "#E53935"));
+        doc.circle(cell.x + 2, cell.y + cell.height / 2, 1, "F");
+      },
+    });
+  }
 
-  items.forEach((item) => {
-    sheet.getRow(legendRow).height = 20;
+  if (items.length > 0) {
+    autoTable(doc, {
+      ...legendOptions,
+      startY: doc.lastAutoTable.finalY + 4,
+      head: [[{ content: "Keterangan", colSpan: 2 }]],
+      body: items.map((item) => [
+        {
+          content: item.code,
+          styles: {
+            fillColor: toColor(item.color, COLORS.white),
+            textColor: toColor(item.text_color, COLORS.black),
+            fontStyle: "bold",
+            halign: "center",
+            lineColor: COLORS.border,
+            lineWidth: 0.15,
+          },
+        },
+        [
+          item.name,
+          formatTimeRange(item) !== "—" ? formatTimeRange(item) : null,
+          categoryLabel(item.category),
+          item.is_active ? null : "nonaktif",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+          .replace(/[–—]/g, "-"), // font bawaan PDF
+      ]),
+      columnStyles: { 0: { cellWidth: 14 } },
+    });
+  }
 
-    sheet.mergeCells(legendRow, 1, legendRow, 2);
-    const codeCell = sheet.getCell(legendRow, 1);
-    codeCell.value = item.code;
-    codeCell.fill = solid(toArgb(item.color, COLORS.white));
-    codeCell.font = {
-      bold: true,
-      size: 10,
-      color: { argb: toArgb(item.text_color, "FF000000") },
-    };
-    codeCell.alignment = { vertical: "middle", horizontal: "center" };
-    sheet.getCell(legendRow, 2).border = BORDER;
-    codeCell.border = BORDER;
+  /* ------------------------------ Footer --------------------------------- */
 
-    sheet.mergeCells(legendRow, 3, legendRow, lastCol);
-    const textCell = sheet.getCell(legendRow, 3);
-    textCell.value = [
-      item.name,
-      formatTimeRange(item) !== "—" ? formatTimeRange(item) : null,
-      categoryLabel(item.category),
-      item.is_active ? null : "nonaktif",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    textCell.font = { size: 10, color: { argb: COLORS.title } };
-    textCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+  const pages = doc.getNumberOfPages();
+  for (let page = 1; page <= pages; page += 1) {
+    doc.setPage(page);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(COLORS.muted);
+    doc.text(
+      `Halaman ${page} dari ${pages}`,
+      pageWidth - MARGIN,
+      pageHeight - 5,
+      {
+        align: "right",
+      },
+    );
+  }
 
-    legendRow += 1;
-  });
-
-  await download(workbook, `jadwal_${schedule.month}.xlsx`);
+  doc.save(`jadwal_${schedule.month}.pdf`);
 }
 
 /* -------------------------------- Component ------------------------------- */
@@ -384,10 +357,10 @@ export default function ExportScheduleButton({
 
     try {
       await beforeExport?.();
-      await exportScheduleExcel(schedule, getCells());
+      await exportSchedulePdf(schedule, getCells());
       notify.success("File jadwal berhasil diunduh.");
     } catch (error) {
-      notify.error(describeError(error) || "Gagal membuat file Excel.");
+      notify.error(describeError(error) || "Gagal membuat file PDF.");
     } finally {
       setExporting(false);
     }
@@ -409,7 +382,7 @@ export default function ExportScheduleButton({
       ) : (
         <>
           <FiDownload size={16} aria-hidden="true" />
-          Export Excel
+          Export PDF
         </>
       )}
     </button>

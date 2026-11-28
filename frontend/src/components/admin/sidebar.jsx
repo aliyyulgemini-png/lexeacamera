@@ -28,29 +28,84 @@ import { normalizeApiError } from "../../lib/api/errors.js";
 import notify from "../../lib/notify.js";
 import { TbFileReport, TbReportSearch } from "react-icons/tb";
 import { LuUserRoundCheck } from "react-icons/lu";
-import { MdOutlineFactCheck } from "react-icons/md";
+import { MdFormatListBulleted, MdOutlineFactCheck } from "react-icons/md";
 import { FaCashRegister } from "react-icons/fa";
+import { GrSchedule } from "react-icons/gr";
 
 /*
-  Hanya 4 menu, jadi tidak perlu dikelompokkan. Urutan mengikuti frekuensi
-  pemakaian dan sama dengan owner: Dashboard, lalu penjualan (Invoice,
-  Pelanggan), lalu katalog (Produk).
+  Urutan menu mengikuti frekuensi pemakaian dan sama dengan owner:
+  penjualan -> katalog -> tim.
+  Item dengan `group` sama harus berurutan agar dikelompokkan benar.
 */
 const navigation = [
-  { label: "Dashboard", href: "/admin", icon: FiHome },
-  { label: "Invoice", href: "/admin/invoices", icon: FiFileText },
-  { label: "Pelanggan", href: "/admin/customers", icon: FiUsers },
-  { label: "Report", href: "/admin/reports", icon: TbReportSearch },
-  { label: "Produk", href: "/admin/cameras", icon: FiBox },
-  { label: "Kasir", href: "/admin/daily-reports", icon: FaCashRegister },
+  { label: "Dashboard", href: "/admin", icon: FiHome, group: null },
 
+  // Penjualan: alur harian
+  {
+    label: "Invoice",
+    href: "/admin/invoices",
+    icon: FiFileText,
+    group: "Penjualan",
+  },
+  {
+    label: "Pelanggan",
+    href: "/admin/customers",
+    icon: FiUsers,
+    group: "Penjualan",
+  },
+  {
+    label: "Report",
+    href: "/admin/reports",
+    icon: TbReportSearch,
+    group: "Penjualan",
+  },
+
+  // Katalog
+  { label: "Produk", href: "/admin/cameras", icon: FiBox, group: "Katalog" },
   {
     label: "Quality Control",
     href: "/admin/quality-controls",
     icon: MdOutlineFactCheck,
+    group: "Katalog",
   },
-  { label: "Absensi", href: "/admin/attendances", icon: LuUserRoundCheck },
+
+  // Tim
+  {
+    label: "Absensi",
+    href: "/admin/attendances",
+    icon: LuUserRoundCheck,
+    group: "Tim",
+  },
+  {
+    label: "Jadwal",
+    href: "/admin/schedules",
+    icon: GrSchedule,
+    group: "Tim",
+  },
+  {
+    label: "Form Jadwal",
+    href: "/admin/schedule-request-forms",
+    icon: MdFormatListBulleted,
+    group: "Tim",
+  },
+  {
+    label: "Kasir",
+    href: "/admin/daily-reports",
+    icon: FaCashRegister,
+    group: "Tim",
+  },
 ];
+
+// Kelompokkan item berurutan berdasarkan `group`.
+// Item tanpa group (Dashboard) tampil tanpa judul.
+const navigationGroups = navigation.reduce((groups, item) => {
+  const last = groups[groups.length - 1];
+
+  if (last && last.label === item.group) last.items.push(item);
+  else groups.push({ label: item.group, items: [item] });
+
+  return groups;
+}, []);
 
 const pageTitles = {
   "/admin": "Dashboard",
@@ -61,6 +116,9 @@ const pageTitles = {
   "/admin/reports": "Reports",
   "/admin/cameras": "Produk",
   "/admin/attendances": "Absensi",
+  "/admin/schedules": "Jadwal",
+  "/admin/schedule-request-forms": "Form Jadwal",
+  "/admin/account": "Akun Saya",
 };
 
 /* Hindari warning useLayoutEffect saat render di server */
@@ -248,13 +306,9 @@ function Sidebar({ mobileOpen, onClose }) {
       </div>
 
       <div className="sidebar-scroll flex-1 overflow-y-auto px-4 py-8">
-        {" "}
-        <p className="mb-4 px-4 text-xs font-semibold uppercase tracking-wider text-primary">
-          Menu utama
-        </p>
         <nav
           aria-label="Navigasi admin"
-          className="relative flex flex-col gap-2"
+          className="relative flex flex-col gap-4"
         >
           <span
             aria-hidden="true"
@@ -269,16 +323,37 @@ function Sidebar({ mobileOpen, onClose }) {
             }}
           />
 
-          {navigation.map((item) => (
-            <SidebarLink
-              key={item.href}
-              item={item}
-              active={item.href === activeHref}
-              onClick={onClose}
-              linkRef={(node) => {
-                linkRefs.current[item.href] = node;
-              }}
-            />
+          {navigationGroups.map((group) => (
+            <div
+              key={group.label ?? "root"}
+              role="group"
+              aria-label={group.label ?? "Utama"}
+              className="flex flex-col gap-2"
+            >
+              {group.label && (
+                <div className="flex items-center gap-2 px-4 pt-2">
+                  <p className="shrink-0 text-xs font-semibold uppercase tracking-wider text-primary/60">
+                    {group.label}
+                  </p>
+                  <span
+                    aria-hidden="true"
+                    className="flex-1 border-t border-dashed border-primary/40"
+                  />
+                </div>
+              )}
+
+              {group.items.map((item) => (
+                <SidebarLink
+                  key={item.href}
+                  item={item}
+                  active={item.href === activeHref}
+                  onClick={onClose}
+                  linkRef={(node) => {
+                    linkRefs.current[item.href] = node;
+                  }}
+                />
+              ))}
+            </div>
           ))}
         </nav>
       </div>

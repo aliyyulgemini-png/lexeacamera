@@ -1,6 +1,7 @@
 import Joi from "joi";
 
 export const ITEM_CATEGORIES = ["SHIFT", "LEAVE", "OFF", "OTHER"];
+export const SCHEDULE_STATUSES = ["DRAFT", "PUBLISHED"];
 
 const MONTH_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;                        // 2026-12
 const DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;  // 2026-12-25
@@ -58,6 +59,7 @@ export const idValidation = Joi.object({ id: id.required() });
 // ===================== JADWAL =====================
 export const getAllScheduleValidation = Joi.object({
   year: Joi.number().integer().min(2000).max(2100).optional(),
+  status: Joi.string().valid(...SCHEDULE_STATUSES).optional(),
 });
 
 export const createScheduleValidation = Joi.object({
@@ -73,6 +75,7 @@ export const updateScheduleValidation = Joi.object({
   id: id.required(),
   title: Joi.string().trim().min(1).max(150).optional(),
   notes: Joi.string().trim().max(5000).allow("", null).optional(),
+  status: Joi.string().valid(...SCHEDULE_STATUSES).optional(),
 });
 
 export const upsertEntriesValidation = Joi.object({

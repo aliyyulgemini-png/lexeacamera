@@ -27,6 +27,8 @@ import cameraBulkDeleteController from "../controller/owner/camera-bulk-delete-c
 import attendanceDeviceController from "../controller/owner/attendance-device-controller.js";
 import scheduleItemController from "../controller/owner/schedule-item-controller.js";
 import scheduleController from "../controller/owner/schedule-controller.js";
+import scheduleRequestFormController from "../controller/owner/schedule-request-form-controller.js";
+import specialDateController from "../controller/owner/special-date-controller.js";
 
 const ownerRouter = express.Router();
 
@@ -204,6 +206,43 @@ ownerRouter.delete(
   "/owner/schedules/:id/employees/:employeeId",
   scheduleController.removeEmployee,
 );
+
+// ---------- Form request jadwal ----------
+ownerRouter.get(
+  "/owner/schedule-request-forms",
+  scheduleRequestFormController.getAll,
+);
+ownerRouter.get(
+  "/owner/schedule-request-forms/:id",
+  scheduleRequestFormController.get,
+);
+ownerRouter.post(
+  "/owner/schedule-request-forms",
+  scheduleRequestFormController.create,
+);
+ownerRouter.put(
+  "/owner/schedule-request-forms/:id",
+  scheduleRequestFormController.update,
+);
+ownerRouter.delete(
+  "/owner/schedule-request-forms/:id",
+  scheduleRequestFormController.remove,
+);
+ownerRouter.get(
+  "/owner/schedule-request-forms/:id/requests",
+  scheduleRequestFormController.getRequests,
+);
+ownerRouter.put(
+  "/owner/schedule-requests/review",
+  scheduleRequestFormController.review,
+);
+
+// ---------- Tanggal spesial (hari besar, tanggal kembar, dll) ----------
+ownerRouter.get("/owner/special-dates", specialDateController.getAll);
+ownerRouter.get("/owner/special-dates/:id", specialDateController.get);
+ownerRouter.post("/owner/special-dates", specialDateController.create);
+ownerRouter.put("/owner/special-dates/:id", specialDateController.update);
+ownerRouter.delete("/owner/special-dates/:id", specialDateController.remove);
 
 ownerRouter.put(
   "/owner/attendances/:id/check-in",
